@@ -1,0 +1,17 @@
+node_modules/
+**/node_modules/
+venv/
+**/venv/
+**/.env
+__pycache__/
+**/__pycache__/
+*.pyc
+*.onnx
+**/*.onnx
+*.glb
+**/*.glb
+*.bin
+**/*.bin
+.DS_Store
+aura_clone/
+backend/browser_profile/

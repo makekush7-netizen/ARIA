@@ -1,0 +1,212 @@
+import React, { useState, useRef, useEffect } from 'react'
+import AvatarZone from './components/AvatarZone'
+import ChatPanel from './components/ChatPanel'
+import VoiceBar from './components/VoiceBar'
+import BubbleMode from './components/BubbleMode'
+import MemoryPanel from './components/MemoryPanel'
+import StorePage from './components/StorePage'
+import HITLModal from './components/HITLModal'
+
+const API_BASE = 'http://localhost:8000'
+
+const getGreeting = () => {
+  const h = new Date().getHours()
+  if (h < 12) return 'Good morning'
+  if (h < 17) return 'Good afternoon'
+  return 'Good evening'
+}
+
+export default function App() {
+  const [currentView, setCurrentView] = useState('home')
+  const [isBubbleMode, setIsBubbleMode] = useState(false)
+  const [messages, setMessages] = useState([
+    { role: 'assistant', content: "Hello! I'm ARIA, your AI assistant. How can I help?", timestamp: new Date() }
+  ])
+  const [isThinking, setIsThinking] = useState(false)
+  const [hitlRequest, setHitlRequest] = useState(null)
+  const [activeTask, setActiveTask] = useState(null)
+  const [memoryData, setMemoryData] = useState({})
+  const [agentState, setAgentState] = useState('idle')
+  const wsRef = useRef(null)
+  const greeting = getGreeting()
+
+  const speakResponse = async (text) => {
+    try {
+      const res = await fetch(`${API_BASE}/synthesize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice: 'female' })
+      })
+      if (res.ok) {
+        const ab = await res.arrayBuffer(); const ac = new (window.AudioContext || window.webkitAudioContext)(); const buf = await ac.decodeAudioData(ab)
+        const src = ac.createBufferSource(); src.buffer = buf; const ana = ac.createAnalyser(); ana.fftSize = 2048; const d = new Uint8Array(ana.frequencyBinCount)
+        src.connect(ana); ana.connect(ac.destination); src.start()
+
+        let raf; const tick = () => {
+          ana.getByteTimeDomainData(d); let sum = 0;
+          for (let i = 0; i < d.length; i++) sum += Math.pow((d[i] - 128) / 128, 2);
+          const v = Math.min(1, Math.sqrt(sum / d.length) * 4);
+          window.dispatchEvent(new CustomEvent('aura:setMorph', { detail: { name: 'mouthOpen', value: v } }))
+          raf = requestAnimationFrame(tick)
+        }
+        tick(); src.onended = () => {
+          cancelAnimationFrame(raf)
+          window.dispatchEvent(new CustomEvent('aura:setMorph', { detail: { name: 'mouthOpen', value: 0 } }))
+          ac.close()
+        }
+      }
+    } catch (e) { console.error('TTS Error', e) }
+  }
+
+  // WebSocket
+  useEffect(() => {
+    const connect = () => {
+      try {
+        const ws = new WebSocket('ws://localhost:8000/ws')
+        wsRef.current = ws
+        ws.onopen = () => console.log('[ARIA] WS connected')
+        ws.onmessage = (e) => {
+          try {
+            const data = JSON.parse(e.data)
+            if (data.type === 'chat_response') {
+              setIsThinking(false)
+              setAgentState('speaking')
+              
+              let finalText = data.content
+              const emotionMatch = finalText.match(/\[EMOTION:\s*(\w+)\]/i)
+              if (emotionMatch) {
+                const emotion = emotionMatch[1].toLowerCase()
+                window.dispatchEvent(new CustomEvent('aura:setEmotion', { detail: emotion }))
+                finalText = finalText.replace(emotionMatch[0], '').trim()
+              } else {
+                window.dispatchEvent(new CustomEvent('aura:setEmotion', { detail: 'happy' }))
+              }
+              
+              setMessages(p => [...p, { role: 'assistant', content: finalText, timestamp: new Date() }])
+              
+              const cleanTTS = finalText.replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF])/g, '').replace(/\(.*?\)/g, '').replace(/\[.*?\]/g, '').trim()
+              if (cleanTTS) speakResponse(cleanTTS)
+
+              setTimeout(() => setAgentState('idle'), 4000)
+            }
+            if (data.type === 'permission_request') setHitlRequest(data)
+            if (data.type === 'task_update') setActiveTask(data.task)
+            if (data.type === 'agent_thinking') {
+              setIsThinking(true); setAgentState('thinking')
+              window.dispatchEvent(new CustomEvent('aura:setEmotion', { detail: 'thinking' }))
+            }
+          } catch (_) {}
+        }
+        ws.onclose = () => setTimeout(connect, 3000)
+        ws.onerror = () => {}
+      } catch (_) {}
+    }
+    connect()
+    return () => wsRef.current?.close()
+  }, [])
+
+  const sendWS = (type, payload = {}) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN)
+      wsRef.current.send(JSON.stringify({ type, ...payload }))
+  }
+
+  const sendMessage = (content) => {
+    if (!content.trim()) return
+    setMessages(p => [...p, { role: 'user', content, timestamp: new Date() }])
+    setIsThinking(true); setAgentState('thinking')
+    window.dispatchEvent(new CustomEvent('aura:setEmotion', { detail: 'thinking' }))
+    sendWS('chat_message', { content, timestamp: new Date().toISOString() })
+  }
+
+  const sendVoiceAudio = (chunk) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(chunk)
+  }
+
+  const handleHITL = (allowed) => {
+    sendWS('permission_response', { allowed })
+    setHitlRequest(null)
+  }
+
+  const navItems = [
+    { id: 'home', label: 'Home', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg> },
+    { id: 'memory', label: 'Memory', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg> },
+    { id: 'store', label: 'Store', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> },
+    { id: 'settings', label: 'Settings', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg> },
+  ]
+
+  return (
+    <div className="app" style={{ display:'flex', flexDirection:'column', height:'100vh' }}>
+      <nav className="navbar">
+        <div className="navbar-logo">
+          <div className="logo-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M12 2v20M2 12h20M4.9 4.9l14.2 14.2M4.9 19.1 19.1 4.9M8 4l8 16M4 8l16 8M4 16l16-8M8 20 16 4"/>
+            </svg>
+          </div>
+          <span className="logo-text">AURORA</span>
+        </div>
+        <div className="navbar-nav">
+          {navItems.map(item => (
+            <button key={item.id} id={`nav-${item.id}`}
+              className={`nav-item ${currentView === item.id ? 'active' : ''}`}
+              onClick={() => setCurrentView(item.id)}>
+              <span className="nav-icon">{item.icon}</span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      <main className="main-content">
+        {currentView === 'home' && (
+          <div className="home-layout">
+            <AvatarZone
+              greeting={greeting}
+              activeTask={activeTask}
+              memoryData={memoryData}
+              agentState={agentState}
+              onToggleBubble={() => setIsBubbleMode(true)}
+            />
+            <ChatPanel
+              messages={messages}
+              isThinking={isThinking}
+              onSendMessage={sendMessage}
+            />
+          </div>
+        )}
+        {currentView === 'memory' && (
+          <MemoryPanel memoryData={memoryData} setMemoryData={setMemoryData} apiBase={API_BASE} />
+        )}
+        {currentView === 'store' && <StorePage />}
+        {currentView === 'settings' && (
+          <div className="settings-placeholder">
+            <h2>Settings</h2>
+            <p>Configuration options coming soon.</p>
+          </div>
+        )}
+      </main>
+
+      {!isBubbleMode && (
+        <VoiceBar
+          onSendMessage={sendMessage}
+          onVoiceAudio={sendVoiceAudio}
+          agentState={agentState}
+          setAgentState={setAgentState}
+        />
+      )}
+
+      {isBubbleMode && (
+        <BubbleMode
+          messages={messages}
+          agentState={agentState}
+          setAgentState={setAgentState}
+          onClose={() => setIsBubbleMode(false)}
+          onSendMessage={sendMessage}
+          onVoiceAudio={sendVoiceAudio}
+        />
+      )}
+
+      {hitlRequest && <HITLModal request={hitlRequest} onRespond={handleHITL} />}
+    </div>
+  )
+}
