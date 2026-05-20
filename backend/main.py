@@ -90,15 +90,15 @@ MEMORY_STORE = load_memory()
 
 @app.get("/api/memory")
 def get_memory():
+    global MEMORY_STORE
+    MEMORY_STORE = load_memory()
     return MEMORY_STORE
 
 @app.put("/api/memory")
 def update_memory(data: dict):
     global MEMORY_STORE
-    MEMORY_STORE.update(data)
-    keys_to_delete = [k for k, v in MEMORY_STORE.items() if not v]
-    for k in keys_to_delete:
-        del MEMORY_STORE[k]
+    # The frontend sends the entire memory state, so we replace it entirely
+    MEMORY_STORE = {k: v for k, v in data.items() if v}
     save_memory(MEMORY_STORE)
     return MEMORY_STORE
 
@@ -147,6 +147,84 @@ def synthesize_endpoint(req: TTSRequest):
         print(f"TTS Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+FINDINGS_DIR = Path(__file__).parent / "findings"
+FINDINGS_DIR.mkdir(parents=True, exist_ok=True)
+
+class NoteRequest(BaseModel):
+    content: str
+
+# Create a sample note on startup so they have a visual note to review!
+sample_note = FINDINGS_DIR / "active_hackathons.md"
+if not sample_note.exists():
+    sample_content = """# 🏆 ARIA Hackathon Scout - Active Hackathons
+
+Welcome to your personal ARIA Findings Notepad! Here are the active hackathons extracted from **Unstop** and similar developer portals.
+
+| Hackathon Name | Organizer | Status | Date/Deadline | Link |
+|:---|:---|:---|:---|:---|
+| **Google Girl Hackathon 2026** | Google India | Open | June 15, 2026 | [View on Unstop](https://unstop.com) |
+| **Smart India Hackathon (SIH)** | Ministry of Education | Upcoming | August 2026 | [View on Unstop](https://unstop.com) |
+| **AWS GenAI Hackathon** | Amazon Web Services | Open | June 30, 2026 | [View on Unstop](https://unstop.com) |
+| **Microsoft Imagine Cup 2026** | Microsoft | Upcoming | Sept 2026 | [View on Unstop](https://unstop.com) |
+
+*Scouted by ARIA at 6:30 AM.*
+"""
+    try:
+        sample_note.write_text(sample_content, encoding="utf-8")
+    except Exception as e:
+        print(f"Failed to create sample note: {e}")
+
+@app.get("/api/notes")
+def list_notes():
+    files = list(FINDINGS_DIR.glob("*.md")) + list(FINDINGS_DIR.glob("*.txt"))
+    notes = []
+    for f in files:
+        notes.append({
+            "filename": f.name,
+            "title": f.stem.replace("_", " ").title(),
+            "updated_at": f.stat().st_mtime
+        })
+    notes.sort(key=lambda x: x["updated_at"], reverse=True)
+    return notes
+
+@app.get("/api/notes/{filename}")
+def read_note(filename: str):
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    file_path = FINDINGS_DIR / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Note not found")
+    try:
+        content = file_path.read_text(encoding="utf-8")
+        return {"filename": filename, "content": content}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/notes/{filename}")
+def save_note(filename: str, req: NoteRequest):
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if not filename.endswith(".md") and not filename.endswith(".txt"):
+        filename += ".md"
+    file_path = FINDINGS_DIR / filename
+    try:
+        file_path.write_text(req.content, encoding="utf-8")
+        return {"filename": filename, "status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/notes/{filename}")
+def delete_note(filename: str):
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    file_path = FINDINGS_DIR / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Note not found")
+    try:
+        file_path.unlink()
+        return {"status": "deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 SYSTEM_PROMPT = """You are ARIA, a 3D AI Avatar living on this website.
 
@@ -170,6 +248,10 @@ Example: "[EMOTION: HAPPY]" (This will make you smile silently).
 BEHAVIOR:
 1. Keep answers conversational, friendly, and brief.
 2. If referring to user details, use their memory context if relevant.
+
+TOOL USAGE:
+1. If the user asks you to perform an action (like filling a form or opening a website) BUT does not provide the required URL, DO NOT GUESS OR HALLUCINATE A LINK. Instead, just ask the user to provide the link in a friendly conversational manner.
+2. Only call a tool when you have all the specific information required to use it correctly.
 """
 
 # Global conversation history cache (keeps the last 15 messages for fast local context)
@@ -247,6 +329,23 @@ def invoke_nova(user_message: str, memory: dict) -> dict:
                                 }
                             },
                             "required": ["url"]
+                        }
+                    }
+                }
+            },
+            {
+                "toolSpec": {
+                    "name": "scout_hackathons",
+                    "description": "Explores Unstop and finds active hackathons/coding competitions for the user, saving the findings to the Notepad.",
+                    "inputSchema": {
+                        "json": {
+                            "type": "object",
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "Optional search query, e.g. 'hackathon' or 'coding competition'."
+                                }
+                            }
                         }
                     }
                 }
@@ -391,6 +490,22 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "content": response_text,
                                 "timestamp": data.get("timestamp")
                             })
+                        elif tool_name == "scout_hackathons":
+                            query = tool_args.get("query", "hackathon")
+                            await websocket.send_json({
+                                "type": "task_update",
+                                "task": "Scouting Unstop..."
+                            })
+                            
+                            from agent_tools import scout_unstop_hackathons
+                            asyncio.create_task(scout_unstop_hackathons(query, websocket))
+                            
+                            response_text = f"[EMOTION: HAPPY] I'm launching my Unstop Scout! I'm visually navigating to Unstop's competition page to search for active '{query}' hackathons. I will compile all hackathons I find into a beautifully formatted document in your Notepad tab. You can inspect it live in a few seconds!"
+                            await websocket.send_json({
+                                "type": "chat_response",
+                                "content": response_text,
+                                "timestamp": data.get("timestamp")
+                            })
                         elif tool_name == "open_desktop_app":
                             app_name = tool_args.get("app_name")
                             await websocket.send_json({
@@ -478,18 +593,29 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                         
                 elif msg_type_str == "permission_response":
-                    allowed = data.get("allowed", False)
-                    print(f"[WS] HITL Permission Response: {'Allowed' if allowed else 'Denied'}")
-                    
-                    # Update active form submission agent session
-                    from agent_tools import active_sessions
-                    active_sessions["submit_form_allowed"] = allowed
-                    if "submit_form" in active_sessions:
-                        active_sessions["submit_form"].set()
+                    # Check if response is an object (for input/voice HITL) or boolean (for submit HITL)
+                    if isinstance(data, dict) and "value" in data:
+                        allowed = data.get("allowed", False)
+                        val = data.get("value", "")
+                        print(f"[WS] HITL Input Response: Allowed={allowed}, Value='{val}'")
+                        
+                        from agent_tools import active_sessions
+                        active_sessions["hitl_input_response"] = {"allowed": allowed, "value": val}
+                        if "hitl_input" in active_sessions:
+                            active_sessions["hitl_input"].set()
+                    else:
+                        allowed = data.get("allowed", False)
+                        print(f"[WS] HITL Permission Response: {'Allowed' if allowed else 'Denied'}")
+                        
+                        # Update active form submission agent session
+                        from agent_tools import active_sessions
+                        active_sessions["submit_form_allowed"] = allowed
+                        if "submit_form" in active_sessions:
+                            active_sessions["submit_form"].set()
                     
             elif "bytes" in msg_type:
                 audio_data = msg_type["bytes"]
-                print(f"[WS] Received audio chunk: {len(audio_data)} bytes")
+                # print(f"[WS] Received audio chunk: {len(audio_data)} bytes")
                 
     except WebSocketDisconnect:
         manager.disconnect(websocket)

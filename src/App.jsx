@@ -6,6 +6,7 @@ import BubbleMode from './components/BubbleMode'
 import MemoryPanel from './components/MemoryPanel'
 import StorePage from './components/StorePage'
 import HITLModal from './components/HITLModal'
+import NotepadPanel from './components/NotepadPanel'
 
 const API_BASE = 'http://localhost:8000'
 
@@ -25,12 +26,34 @@ export default function App() {
   const [isThinking, setIsThinking] = useState(false)
   const [hitlRequest, setHitlRequest] = useState(null)
   const [activeTask, setActiveTask] = useState(null)
+  const [taskLog, setTaskLog] = useState([])
   const [memoryData, setMemoryData] = useState({})
   const [agentState, setAgentState] = useState('idle')
   const wsRef = useRef(null)
   const greeting = getGreeting()
+  const audioContextRef = useRef(null)
+  const rafRef = useRef(null)
+
+  const stopActiveAudio = () => {
+    if (audioContextRef.current) {
+      try {
+        if (audioContextRef.current.state !== 'closed') {
+          audioContextRef.current.close()
+        }
+      } catch (e) {
+        console.error('Error closing AudioContext:', e)
+      }
+      audioContextRef.current = null
+    }
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
+    window.dispatchEvent(new CustomEvent('aura:setMorph', { detail: { name: 'mouthOpen', value: 0 } }))
+  }
 
   const speakResponse = async (text) => {
+    stopActiveAudio()
     try {
       const res = await fetch(`${API_BASE}/synthesize`, {
         method: 'POST',
@@ -38,21 +61,48 @@ export default function App() {
         body: JSON.stringify({ text, voice: 'female' })
       })
       if (res.ok) {
-        const ab = await res.arrayBuffer(); const ac = new (window.AudioContext || window.webkitAudioContext)(); const buf = await ac.decodeAudioData(ab)
-        const src = ac.createBufferSource(); src.buffer = buf; const ana = ac.createAnalyser(); ana.fftSize = 2048; const d = new Uint8Array(ana.frequencyBinCount)
-        src.connect(ana); ana.connect(ac.destination); src.start()
-
-        let raf; const tick = () => {
-          ana.getByteTimeDomainData(d); let sum = 0;
-          for (let i = 0; i < d.length; i++) sum += Math.pow((d[i] - 128) / 128, 2);
-          const v = Math.min(1, Math.sqrt(sum / d.length) * 4);
-          window.dispatchEvent(new CustomEvent('aura:setMorph', { detail: { name: 'mouthOpen', value: v } }))
-          raf = requestAnimationFrame(tick)
+        const ab = await res.arrayBuffer()
+        // Ensure no other fetch completed while we were waiting
+        stopActiveAudio()
+        
+        const ac = new (window.AudioContext || window.webkitAudioContext)()
+        audioContextRef.current = ac
+        
+        // Browsers require resuming AudioContext after creation if there wasn't a recent user gesture
+        if (ac.state === 'suspended') {
+          await ac.resume()
         }
-        tick(); src.onended = () => {
-          cancelAnimationFrame(raf)
+        
+        const buf = await ac.decodeAudioData(ab)
+        const src = ac.createBufferSource()
+        src.buffer = buf
+        const ana = ac.createAnalyser()
+        ana.fftSize = 2048
+        const d = new Uint8Array(ana.frequencyBinCount)
+        
+        src.connect(ana)
+        ana.connect(ac.destination)
+        src.start()
+
+        const tick = () => {
+          ana.getByteTimeDomainData(d)
+          let sum = 0
+          for (let i = 0; i < d.length; i++) sum += Math.pow((d[i] - 128) / 128, 2)
+          const v = Math.min(1, Math.sqrt(sum / d.length) * 4)
+          window.dispatchEvent(new CustomEvent('aura:setMorph', { detail: { name: 'mouthOpen', value: v } }))
+          rafRef.current = requestAnimationFrame(tick)
+        }
+        tick()
+        
+        src.onended = () => {
+          if (rafRef.current) cancelAnimationFrame(rafRef.current)
           window.dispatchEvent(new CustomEvent('aura:setMorph', { detail: { name: 'mouthOpen', value: 0 } }))
-          ac.close()
+          try {
+            ac.close()
+          } catch (_) {}
+          if (audioContextRef.current === ac) {
+            audioContextRef.current = null
+          }
         }
       }
     } catch (e) { console.error('TTS Error', e) }
@@ -72,6 +122,8 @@ export default function App() {
               setIsThinking(false)
               setAgentState('speaking')
               
+              stopActiveAudio()
+              
               let finalText = data.content
               const emotionMatch = finalText.match(/\[EMOTION:\s*(\w+)\]/i)
               if (emotionMatch) {
@@ -85,12 +137,40 @@ export default function App() {
               setMessages(p => [...p, { role: 'assistant', content: finalText, timestamp: new Date() }])
               
               const cleanTTS = finalText.replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF])/g, '').replace(/\(.*?\)/g, '').replace(/\[.*?\]/g, '').trim()
-              if (cleanTTS) speakResponse(cleanTTS)
+              
+              // Truncate cleanTTS to first sentence or first 110 characters to ensure ultra-fast, sub-second synthesis
+              let shortTTS = cleanTTS.split(/[.!?]+/)[0] + '.';
+              if (shortTTS.length > 110) {
+                shortTTS = cleanTTS.substring(0, 100) + '...';
+              }
+              
+              if (cleanTTS) speakResponse(shortTTS)
 
               setTimeout(() => setAgentState('idle'), 4000)
             }
-            if (data.type === 'permission_request') setHitlRequest(data)
-            if (data.type === 'task_update') setActiveTask(data.task)
+            if (data.type === 'permission_request') {
+              // Beep sound for HITL to alert the user!
+              try {
+                const ac = new (window.AudioContext || window.webkitAudioContext)();
+                if (ac.state === 'suspended') ac.resume();
+                const osc = ac.createOscillator(); const gain = ac.createGain();
+                osc.connect(gain); gain.connect(ac.destination);
+                osc.type = 'sine'; osc.frequency.setValueAtTime(880, ac.currentTime);
+                gain.gain.setValueAtTime(0.1, ac.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, ac.currentTime + 0.5);
+                osc.start(ac.currentTime); osc.stop(ac.currentTime + 0.5);
+              } catch (_) {}
+              setHitlRequest(data)
+            }
+            if (data.type === 'task_update') {
+              setActiveTask(data.task)
+              setTaskLog(prev => {
+                if (prev.length === 0 || prev[prev.length - 1] !== data.task) {
+                   return [...prev, data.task].slice(-8) // keep last 8 tasks
+                }
+                return prev
+              })
+            }
             if (data.type === 'agent_thinking') {
               setIsThinking(true); setAgentState('thinking')
               window.dispatchEvent(new CustomEvent('aura:setEmotion', { detail: 'thinking' }))
@@ -112,6 +192,7 @@ export default function App() {
 
   const sendMessage = (content) => {
     if (!content.trim()) return
+    stopActiveAudio()
     setMessages(p => [...p, { role: 'user', content, timestamp: new Date() }])
     setIsThinking(true); setAgentState('thinking')
     window.dispatchEvent(new CustomEvent('aura:setEmotion', { detail: 'thinking' }))
@@ -119,17 +200,23 @@ export default function App() {
   }
 
   const sendVoiceAudio = (chunk) => {
+    stopActiveAudio()
     if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(chunk)
   }
 
-  const handleHITL = (allowed) => {
-    sendWS('permission_response', { allowed })
+  const handleHITL = (response) => {
+    if (typeof response === 'object' && response !== null) {
+      sendWS('permission_response', response)
+    } else {
+      sendWS('permission_response', { allowed: response })
+    }
     setHitlRequest(null)
   }
 
   const navItems = [
     { id: 'home', label: 'Home', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg> },
     { id: 'memory', label: 'Memory', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg> },
+    { id: 'notepad', label: 'Notepad', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg> },
     { id: 'store', label: 'Store', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> },
     { id: 'settings', label: 'Settings', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg> },
   ]
@@ -163,6 +250,7 @@ export default function App() {
             <AvatarZone
               greeting={greeting}
               activeTask={activeTask}
+              taskLog={taskLog}
               memoryData={memoryData}
               agentState={agentState}
               onToggleBubble={() => setIsBubbleMode(true)}
@@ -176,6 +264,9 @@ export default function App() {
         )}
         {currentView === 'memory' && (
           <MemoryPanel memoryData={memoryData} setMemoryData={setMemoryData} apiBase={API_BASE} />
+        )}
+        {currentView === 'notepad' && (
+          <NotepadPanel apiBase={API_BASE} />
         )}
         {currentView === 'store' && <StorePage />}
         {currentView === 'settings' && (
