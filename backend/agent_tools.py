@@ -605,8 +605,14 @@ async def fill_form_with_playwright(url: str, memory: Dict[str, str], websocket=
                         except Exception as e:
                             print(f"[Memory Sync Error]: {e}")
                             
-                        await broadcast_status(websocket, "Thank you! Memory updated. Autofilling fields...")
-                        await asyncio.sleep(2)
+                        # Programmatically autofill the newly submitted custom fields instantly!
+                        autofilled_count = await page.evaluate(PROGRAMMATIC_AUTOFILL_JS, memory)
+                        if autofilled_count > 0:
+                            await broadcast_status(websocket, f"Instantly populated {autofilled_count} new fields on form...")
+                            await asyncio.sleep(1)
+                        else:
+                            await broadcast_status(websocket, "Thank you! Memory updated. Autofilling fields...")
+                            await asyncio.sleep(2)
                         
                         # Re-scan elements in the next iteration using updated memory!
                         continue
