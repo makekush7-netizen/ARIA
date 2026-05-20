@@ -300,7 +300,7 @@ WHOLE_FORM_SCAN_JS = """
         placeholder: el.getAttribute('placeholder') || '',
         name: el.getAttribute('name') || '',
         currentValue: el.value || '',
-        labelText: (labelText || '').replace(/\n/g, ' ').substring(0, 150).trim()
+        labelText: (labelText || '').replace(/\\n/g, ' ').substring(0, 150).trim()
       };
     } catch (e) {
       return {
@@ -355,7 +355,7 @@ PROGRAMMATIC_AUTOFILL_JS = """
         labelText = el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('name') || '';
       }
       
-      labelText = (labelText || '').replace(/[\n\r\t\s\xa0\u200b]+/g, ' ').split('*')[0].trim();
+      labelText = (labelText || '').replace(/[\\n\\r\\t\\s\\xa0\\u200b]+/g, ' ').split('*')[0].trim();
       if (!labelText) return;
       
       // Check if standard key matching matches
