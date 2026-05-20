@@ -284,7 +284,7 @@ PROGRAMMATIC_AUTOFILL_JS = """
       labelText = el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('name') || '';
     }
     
-    labelText = labelText.replace(/\\n/g, ' ').split('*')[0].trim();
+    labelText = labelText.replace(/[\n\r\t\s\xa0\u200b]+/g, ' ').split('*')[0].trim();
     if (!labelText) return;
     
     // Check if standard key matching matches
@@ -455,13 +455,17 @@ async def fill_form_with_playwright(url: str, memory: Dict[str, str], websocket=
     injects numbered overlay badges, captures screenshots, and utilizes Bedrock Nova
     to visually execute clicks, option selections, and inputs (Visual ARIA agent).
     """
-    await broadcast_status(websocket, "Launching visual browser workspace...")
-    PROFILE_PATH.mkdir(parents=True, exist_ok=True)
-    
-    # Track asked questions in this session to avoid asking duplicate items
-    asked_keys = set()
-    
-    async with async_playwright() as p:
+    active_sessions["current_task"] = asyncio.current_task()
+    p = None
+    context = None
+    try:
+        await broadcast_status(websocket, "Launching visual browser workspace...")
+        PROFILE_PATH.mkdir(parents=True, exist_ok=True)
+        
+        # Track asked questions in this session to avoid asking duplicate items
+        asked_keys = set()
+        
+        p = await async_playwright().start()
         context = await p.chromium.launch_persistent_context(
             user_data_dir=str(PROFILE_PATH),
             headless=False,
@@ -535,14 +539,19 @@ async def fill_form_with_playwright(url: str, memory: Dict[str, str], websocket=
                                         "question": f"What is your {label_clean}?"
                                     })
                         else:
-                            # Custom field lookup
-                            clean_lbl = label.lower().replace(" ", "_").replace("(", "").replace(")", "").replace(".", "").replace("-", "").strip()
-                            clean_lbl = clean_lbl.split("\n")[0].split("*")[0].strip()
+                            # Robust custom field sanitization
+                            clean_lbl = re.sub(r'[\s\xa0\u200b]+', ' ', label)
+                            clean_lbl = clean_lbl.replace('*', '')
+                            clean_lbl = clean_lbl.lower().strip()
+                            clean_lbl = re.sub(r'[^a-z0-9]+', '_', clean_lbl).strip('_')
                             
                             # Let's check if the memory contains this key
                             custom_mem_val = None
                             for k, v in memory.items():
-                                if k.lower().replace("_", "") == clean_lbl.replace("_", ""):
+                                clean_k = re.sub(r'[\s\xa0\u200b]+', ' ', k)
+                                clean_k = clean_k.replace('*', '').lower().strip()
+                                clean_k = re.sub(r'[^a-z0-9]+', '_', clean_k).strip('_')
+                                if clean_k == clean_lbl:
                                     custom_mem_val = v
                                     break
                                     
@@ -595,7 +604,9 @@ async def fill_form_with_playwright(url: str, memory: Dict[str, str], websocket=
                             current_mem = {}
                             
                         for mk, mv in user_values.items():
-                            clean_k = mk.lower().replace(" ", "_").replace("(", "").replace(")", "").replace(".", "").replace("-", "").strip()
+                            clean_k = re.sub(r'[\s\xa0\u200b]+', ' ', mk)
+                            clean_k = clean_k.replace('*', '').lower().strip()
+                            clean_k = re.sub(r'[^a-z0-9]+', '_', clean_k).strip('_')
                             memory[clean_k] = mv
                             current_mem[clean_k] = mv
                             
@@ -817,6 +828,9 @@ async def fill_form_with_playwright(url: str, memory: Dict[str, str], websocket=
                                 await broadcast_status(websocket, "Form submitted successfully!")
                             else:
                                 await broadcast_status(websocket, "Submission declined. Keeping browser open for manual inspection.")
+                            
+                            # Set loop_count to max_loops to break out of the main while loop completely!
+                            loop_count = max_loops
                             break
                         else:
                             await element.click()
@@ -850,7 +864,22 @@ async def fill_form_with_playwright(url: str, memory: Dict[str, str], websocket=
                 
         await broadcast_status(websocket, "Vision Form Filler task complete. Browser window is ready.")
         await asyncio.sleep(3)
-        await context.close()
+        
+    finally:
+        if context:
+            try:
+                await context.close()
+            except Exception:
+                pass
+        if p:
+            try:
+                await p.stop()
+            except Exception:
+                pass
+        active_sessions.pop("current_task", None)
+        active_sessions.pop("hitl_input", None)
+        active_sessions.pop("submit_form", None)
+        await broadcast_status(websocket, None)
         
     return "Visual Form Filling task complete!"
 
@@ -859,10 +888,14 @@ async def scout_unstop_hackathons(query: str = "hackathon", websocket=None) -> s
     Playwright scraper that goes to unstop.com, searches for hackathons,
     and saves the parsed list into findings/scouted_hackathons.md.
     """
-    await broadcast_status(websocket, "Launching Unstop Hackathon Scout...")
-    PROFILE_PATH.mkdir(parents=True, exist_ok=True)
-    
-    async with async_playwright() as p:
+    active_sessions["current_task"] = asyncio.current_task()
+    p = None
+    context = None
+    try:
+        await broadcast_status(websocket, "Launching Unstop Hackathon Scout...")
+        PROFILE_PATH.mkdir(parents=True, exist_ok=True)
+        
+        p = await async_playwright().start()
         context = await p.chromium.launch_persistent_context(
             user_data_dir=str(PROFILE_PATH),
             headless=False,
@@ -942,7 +975,20 @@ I explored **Unstop** and found the following active and upcoming hackathons for
         
         await broadcast_status(websocket, "Hackathon Scout completed! Report saved to Notepad.")
         await asyncio.sleep(3)
-        await context.close()
+        
+    finally:
+        if context:
+            try:
+                await context.close()
+            except Exception:
+                pass
+        if p:
+            try:
+                await p.stop()
+            except Exception:
+                pass
+        active_sessions.pop("current_task", None)
+        await broadcast_status(websocket, None)
         
     return "Hackathon scout completed successfully!"
 

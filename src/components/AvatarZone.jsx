@@ -30,7 +30,7 @@ function PlatformGlow() {
   )
 }
 
-export default function AvatarZone({ greeting, activeTask, taskLog = [], memoryData, agentState, onToggleBubble }) {
+export default function AvatarZone({ greeting, activeTask, taskLog = [], memoryData, agentState, onToggleBubble, onStopAgent }) {
   const fullName = memoryData?.name || 'there'
   const firstName = fullName.split(' ')[0]
   const memCount = Object.keys(memoryData).filter(k => memoryData[k]).length
@@ -49,55 +49,96 @@ export default function AvatarZone({ greeting, activeTask, taskLog = [], memoryD
         <button id="bubble-toggle-btn" className="bubble-toggle" onClick={onToggleBubble} title="Bubble mode">⊙</button>
         
         {/* Agent Workflow Planner HUD */}
-        {taskLog.length > 0 && (
+        {/* Agent Workflow Planner HUD */}
+        {(taskLog.length > 0 || activeTask) && (
           <div style={{
             position: 'absolute',
             top: '20px',
             right: '20px',
-            background: 'var(--surface)',
+            background: 'rgba(21, 19, 17, 0.85)',
             backdropFilter: 'blur(20px)',
             border: '1px solid var(--border)',
             borderRadius: '16px',
             padding: '16px',
             width: '280px',
-            pointerEvents: 'none',
+            pointerEvents: 'auto',
             zIndex: 10,
-            boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+            boxShadow: '0 8px 30px rgba(0,0,0,0.5)'
           }}>
             <h4 style={{ color: 'var(--gold)', margin: '0 0 12px 0', fontSize: '13px', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-              EXECUTION PLAN
+              {taskLog.length > 0 ? 'EXECUTION PLAN' : 'ACTIVE TASK'}
             </h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {taskLog.map((task, i) => {
-                const isLast = i === taskLog.length - 1;
-                return (
-                  <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', position: 'relative' }}>
-                    {i !== taskLog.length - 1 && (
-                      <div style={{ position: 'absolute', left: '5px', top: '15px', width: '1px', height: '100%', background: 'var(--border)' }} />
-                    )}
-                    <div style={{ 
-                      width: '10px', height: '10px', 
-                      borderRadius: '50%', 
-                      background: isLast ? 'var(--gold)' : 'transparent',
-                      border: isLast ? 'none' : '2px solid var(--border)',
-                      marginTop: '4px',
-                      flexShrink: 0,
-                      zIndex: 2,
-                      boxShadow: isLast ? '0 0 8px var(--gold-glow)' : 'none'
-                    }} />
-                    <span style={{ 
-                      fontSize: '12px', 
-                      color: isLast ? 'var(--text)' : 'var(--text-sec)',
-                      fontWeight: isLast ? '500' : '400',
-                      lineHeight: '1.4'
-                    }}>
-                      {task}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
+            
+            {taskLog.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {taskLog.map((task, i) => {
+                  const isLast = i === taskLog.length - 1;
+                  return (
+                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', position: 'relative' }}>
+                      {i !== taskLog.length - 1 && (
+                        <div style={{ position: 'absolute', left: '5px', top: '15px', width: '1px', height: '100%', background: 'var(--border)' }} />
+                      )}
+                      <div style={{ 
+                        width: '10px', height: '10px', 
+                        borderRadius: '50%', 
+                        background: isLast ? 'var(--gold)' : 'transparent',
+                        border: isLast ? 'none' : '2px solid var(--border)',
+                        marginTop: '4px',
+                        flexShrink: 0,
+                        zIndex: 2,
+                        boxShadow: isLast ? '0 0 8px var(--gold-glow)' : 'none'
+                      }} />
+                      <span style={{ 
+                        fontSize: '12px', 
+                        color: isLast ? 'var(--text)' : 'var(--text-sec)',
+                        fontWeight: isLast ? '500' : '400',
+                        lineHeight: '1.4'
+                      }}>
+                        {task}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div style={{ fontSize: '12px', color: 'var(--text)', lineHeight: '1.4' }}>
+                {activeTask}
+              </div>
+            )}
+
+            {activeTask && onStopAgent && (
+              <button 
+                onClick={onStopAgent}
+                style={{
+                  marginTop: '16px',
+                  width: '100%',
+                  padding: '8px 12px',
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: '1px solid rgba(239, 68, 68, 0.4)',
+                  color: '#ef4444',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.background = 'rgba(239, 68, 68, 0.25)'
+                  e.currentTarget.style.boxShadow = '0 0 10px rgba(239, 68, 68, 0.2)'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)'
+                  e.currentTarget.style.boxShadow = 'none'
+                }}
+              >
+                <span style={{ fontSize: '14px', lineHeight: 1 }}>■</span> Terminate Active Agent
+              </button>
+            )}
           </div>
         )}
 

@@ -29,14 +29,36 @@ export default function MemoryPanel({ memoryData, setMemoryData, apiBase }) {
     setLocal(p => { 
       const n = { ...p }
       delete n[key]
+      // Sync immediately to backend so it's persisted instantly!
+      fetch(`${apiBase}/api/memory`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(n)
+      })
+        .then(r => r.json())
+        .then(d => { setMemoryData(d); setLocal(d); })
+        .catch(() => setMemoryData(n))
       return n 
     })
   }
 
   const handleAddCustomField = () => {
     if (!customKeyInput.trim() || !customValInput.trim()) return
-    const key = customKeyInput.toLowerCase().replace(/\s+/g, '_').trim()
-    setLocal(p => ({ ...p, [key]: customValInput }))
+    const cleanKey = customKeyInput.replace(/\*/g, '').toLowerCase().replace(/[\s\xa0\u200b]+/g, '_').trim()
+    if (!cleanKey) return
+    setLocal(p => {
+      const n = { ...p, [cleanKey]: customValInput }
+      // Sync immediately to backend so it's persisted instantly!
+      fetch(`${apiBase}/api/memory`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(n)
+      })
+        .then(r => r.json())
+        .then(d => { setMemoryData(d); setLocal(d); })
+        .catch(() => setMemoryData(n))
+      return n
+    })
     setCustomKeyInput('')
     setCustomValInput('')
     setShowAddCustom(false)

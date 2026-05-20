@@ -68,12 +68,66 @@ app.add_middleware(
 # Local persistence path
 MEMORY_FILE_PATH = Path(__file__).parent / "memory.json"
 
+def sanitize_key_logic(k: str) -> str:
+    # 1. Standard keys mapping (case-insensitive checks)
+    k_lower = k.lower().strip()
+    if "email" in k_lower or "e-mail" in k_lower or "mail id" in k_lower:
+        return "email"
+    elif "phone" in k_lower or "mobile" in k_lower or "contact" in k_lower or "tel" in k_lower or "number" in k_lower:
+        if "roll" not in k_lower:
+            return "phone"
+    elif "roll" in k_lower or "reg" in k_lower or "registration" in k_lower or "id number" in k_lower:
+        return "rollNo"
+    elif "college" in k_lower or "university" in k_lower or "institute" in k_lower or "school" in k_lower:
+        return "college"
+    elif "dept" in k_lower or "department" in k_lower or "branch" in k_lower or "course" in k_lower or "stream" in k_lower:
+        return "department"
+    elif "name" in k_lower or "full name" in k_lower or "first name" in k_lower or "last name" in k_lower:
+        if k_lower != "name":
+            # Check if this matches a custom field (like father name, project name). If it has other words, treat as custom!
+            words = [w for w in re.split(r'[^a-z]+', k_lower) if w]
+            if len(words) == 1 or (len(words) == 2 and words[0] in ["full", "first", "last"]):
+                return "name"
+                
+    # 2. General custom key sanitization
+    clean = re.sub(r'[\s\xa0\u200b]+', ' ', k)
+    clean = clean.replace('*', '')
+    clean = clean.lower().strip()
+    clean = re.sub(r'[^a-z0-9]+', '_', clean).strip('_')
+    return clean
+
 # Load memory from file
 def load_memory() -> Dict[str, str]:
     if MEMORY_FILE_PATH.exists():
         try:
             with open(MEMORY_FILE_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
+                raw_mem = json.load(f)
+            
+            sanitized_mem = {}
+            dirty = False
+            for k, v in raw_mem.items():
+                clean_k = sanitize_key_logic(k)
+                if clean_k != k:
+                    dirty = True
+                if clean_k:
+                    # If duplicate clean key, keep the longer/non-empty value
+                    if clean_k in sanitized_mem:
+                        old_v = sanitized_mem[clean_k]
+                        if not old_v and v:
+                            sanitized_mem[clean_k] = v
+                        elif v and len(str(v).strip()) > len(str(old_v).strip()):
+                            sanitized_mem[clean_k] = v
+                    else:
+                        sanitized_mem[clean_k] = v
+            
+            # If any key was cleaned, save the sanitized version immediately to clean up memory.json!
+            if dirty:
+                try:
+                    with open(MEMORY_FILE_PATH, "w", encoding="utf-8") as f:
+                        json.dump(sanitized_mem, f, indent=4, ensure_ascii=False)
+                except Exception as save_err:
+                    print(f"Error auto-sanitizing memory.json: {save_err}")
+            return sanitized_mem
         except Exception as e:
             print(f"Error loading memory: {e}")
     return {"name": "", "email": ""}
@@ -81,8 +135,14 @@ def load_memory() -> Dict[str, str]:
 # Save memory to file
 def save_memory(data: dict):
     try:
+        # Sanitize keys before saving
+        sanitized_data = {}
+        for k, v in data.items():
+            clean_k = sanitize_key_logic(k)
+            if clean_k and v:
+                sanitized_data[clean_k] = v
         with open(MEMORY_FILE_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
+            json.dump(sanitized_data, f, indent=4, ensure_ascii=False)
     except Exception as e:
         print(f"Error saving memory: {e}")
 
@@ -97,8 +157,8 @@ def get_memory():
 @app.put("/api/memory")
 def update_memory(data: dict):
     global MEMORY_STORE
-    # The frontend sends the entire memory state, so we replace it entirely
-    MEMORY_STORE = {k: v for k, v in data.items() if v}
+    # Clean keys and filter out empty values
+    MEMORY_STORE = {sanitize_key_logic(k): v for k, v in data.items() if v and sanitize_key_logic(k)}
     save_memory(MEMORY_STORE)
     return MEMORY_STORE
 
@@ -613,6 +673,26 @@ async def websocket_endpoint(websocket: WebSocket):
                         active_sessions["submit_form_allowed"] = allowed
                         if "submit_form" in active_sessions:
                             active_sessions["submit_form"].set()
+                            
+                elif msg_type_str == "stop_task":
+                    print("[WS] User requested active task termination.")
+                    from agent_tools import active_sessions
+                    current_task = active_sessions.get("current_task")
+                    if current_task:
+                        current_task.cancel()
+                        await websocket.send_json({
+                            "type": "task_update",
+                            "task": "Task terminated by user."
+                        })
+                        await websocket.send_json({
+                            "type": "chat_response",
+                            "content": "[EMOTION: HAPPY] I have immediately terminated the active browser agent as requested!"
+                        })
+                    else:
+                        await websocket.send_json({
+                            "type": "chat_response",
+                            "content": "There is no active automation task running right now."
+                        })
                     
             elif "bytes" in msg_type:
                 audio_data = msg_type["bytes"]
@@ -621,6 +701,11 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
         print("[WS] Client disconnected")
+        from agent_tools import active_sessions
+        current_task = active_sessions.get("current_task")
+        if current_task:
+            print("[WS] Client disconnected: Cancelling active browser automation task.")
+            current_task.cancel()
 
 if __name__ == "__main__":
     import uvicorn

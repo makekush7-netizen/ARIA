@@ -217,6 +217,10 @@ export default function App() {
     setHitlRequest(null)
   }
 
+  const stopAgent = () => {
+    sendWS('stop_task')
+  }
+
   const navItems = [
     { id: 'home', label: 'Home', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg> },
     { id: 'memory', label: 'Memory', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg> },
@@ -258,6 +262,7 @@ export default function App() {
               memoryData={memoryData}
               agentState={agentState}
               onToggleBubble={() => setIsBubbleMode(true)}
+              onStopAgent={stopAgent}
             />
             <ChatPanel
               messages={messages}

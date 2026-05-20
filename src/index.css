@@ -525,11 +525,12 @@ body {
 /* HITL MODAL */
 .hitl-overlay {
   position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
-  width: 440px; z-index: 50;
-  background: var(--surface);
+  width: 440px; z-index: 1000;
+  background: #181614;
   border: 1px solid var(--border);
   border-radius: 16px; padding: 20px 24px;
-  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+  box-shadow: 0 12px 48px rgba(0,0,0,0.8), 0 0 16px rgba(212,163,89,0.05);
+  backdrop-filter: blur(16px);
   animation: slide-up 0.25s ease;
 }
 .hitl-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
