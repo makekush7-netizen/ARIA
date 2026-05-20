@@ -114,6 +114,14 @@ export default function App() {
     }
   }
 
+  // Load memory from backend on mount
+  useEffect(() => {
+    fetch(`${API_BASE}/api/memory`)
+      .then(r => r.json())
+      .then(d => setMemoryData(d))
+      .catch(e => console.error('[ARIA] Error fetching memory on mount:', e))
+  }, [])
+
   // WebSocket
   useEffect(() => {
     const connect = () => {
@@ -168,12 +176,16 @@ export default function App() {
             }
             if (data.type === 'task_update') {
               setActiveTask(data.task)
-              setTaskLog(prev => {
-                if (prev.length === 0 || prev[prev.length - 1] !== data.task) {
-                   return [...prev, data.task].slice(-8) // keep last 8 tasks
-                }
-                return prev
-              })
+              if (!data.task) {
+                setTaskLog([])
+              } else {
+                setTaskLog(prev => {
+                  if (prev.length === 0 || prev[prev.length - 1] !== data.task) {
+                     return [...prev, data.task].slice(-8)
+                  }
+                  return prev
+                })
+              }
             }
             if (data.type === 'agent_thinking') {
               setIsThinking(true); setAgentState('thinking')

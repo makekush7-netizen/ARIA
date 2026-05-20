@@ -62,6 +62,10 @@ OVERLAY_JS = """
   const existing = document.querySelectorAll('.aria-badge');
   existing.forEach(e => e.remove());
 
+  // Increment version to kill previous requestAnimationFrame loops
+  window.ariaOverlayIteration = (window.ariaOverlayIteration || 0) + 1;
+  const currentIteration = window.ariaOverlayIteration;
+
   window.ariaElements = [];
   
   // Find visible interactive elements
@@ -99,100 +103,156 @@ OVERLAY_JS = """
 
   let index = 1;
   candidates.forEach(el => {
-    if (el.closest('.aria-badge') || el.classList.contains('aria-badge')) return;
-    
-    // Assign index
-    const id = index++;
-    window.ariaElements.push({ id, element: el });
-    
-    // Create floating visual badge
-    const badge = document.createElement('div');
-    badge.className = 'aria-badge';
-    badge.innerText = `[${id}]`;
-    
-    Object.assign(badge.style, {
-      position: 'absolute',
-      backgroundColor: '#facc15',
-      color: '#000000',
-      border: '2px solid #000000',
-      borderRadius: '4px',
-      padding: '2px 5px',
-      fontSize: '11px',
-      fontWeight: 'bold',
-      fontFamily: 'monospace',
-      zIndex: '2147483647',
-      pointerEvents: 'none',
-      boxShadow: '0 2px 5px rgba(0,0,0,0.5)',
-    });
-    
-    const rect = el.getBoundingClientRect();
-    const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
-    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-    
-    badge.style.left = `${rect.left + scrollLeft - 5}px`;
-    badge.style.top = `${rect.top + scrollTop - 8}px`;
-    
-    document.body.appendChild(badge);
+    try {
+      if (el.closest('.aria-badge') || el.classList.contains('aria-badge')) return;
+      
+      // Assign index
+      const id = index++;
+      
+      // Create floating visual badge using fixed positioning
+      const badge = document.createElement('div');
+      badge.className = 'aria-badge';
+      badge.innerText = `[${id}]`;
+      
+      Object.assign(badge.style, {
+        position: 'fixed',
+        backgroundColor: '#facc15',
+        color: '#000000',
+        border: '2px solid #000000',
+        borderRadius: '4px',
+        padding: '2px 5px',
+        fontSize: '11px',
+        fontWeight: 'bold',
+        fontFamily: 'monospace',
+        zIndex: '2147483647',
+        pointerEvents: 'none',
+        boxShadow: '0 2px 5px rgba(0,0,0,0.5)',
+      });
+      
+      document.body.appendChild(badge);
+      window.ariaElements.push({ id, element: el, badge: badge });
+    } catch (err) {
+      console.error('[ARIA Overlay Error] Failed to badge element:', err);
+    }
   });
 
+  // Reposition helper using getBoundingClientRect relative to the viewport
+  const reposition = () => {
+    if (!window.ariaElements) return;
+    window.ariaElements.forEach(item => {
+      const el = item.element;
+      const badge = item.badge;
+      if (!el || !badge) return;
+      
+      // If target element is no longer in the DOM, remove the badge
+      if (!document.body.contains(el)) {
+        badge.remove();
+        return;
+      }
+      
+      const rect = el.getBoundingClientRect();
+      const isCurrentlyVisible = rect.width > 0 && rect.height > 0;
+      
+      if (!isCurrentlyVisible) {
+        badge.style.display = 'none';
+      } else {
+        badge.style.display = 'block';
+        badge.style.left = `${rect.left - 5}px`;
+        badge.style.top = `${rect.top - 8}px`;
+      }
+    });
+  };
+
+  // Initial call
+  reposition();
+
+  // Listen to ALL scrolls and resizes on the page (capture phase ensures nested div scroll mapping)
+  window.addEventListener('scroll', reposition, { capture: true, passive: true });
+  window.addEventListener('resize', reposition, { passive: true });
+
+  // requestAnimationFrame tick loop to handle dynamic layout/autofill shifts
+  const tick = () => {
+    if (window.ariaOverlayIteration !== currentIteration) {
+      // New overlay instance was injected, exit stale loop
+      return;
+    }
+    reposition();
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+
   return window.ariaElements.map(item => {
-    const el = item.element;
-    const placeholder = el.getAttribute('placeholder') || '';
-    const name = el.getAttribute('name') || '';
-    const ariaLabel = el.getAttribute('aria-label') || '';
-    const type = el.getAttribute('type') || '';
-    const role = el.getAttribute('role') || '';
-    const currentValue = el.value || '';
-    
-    let labelText = '';
-    
-    // 1. Google Forms/Structured cards container climbing
-    let current = el;
-    while (current && current !== document.body) {
-      if (current.classList && (
-        current.classList.contains('Qr7Oae') || 
-        current.classList.contains('geS5ne') || 
-        current.getAttribute('role') === 'listitem' ||
-        current.classList.contains('freebirdFormviewerComponentsQuestionBaseRoot')
-      )) {
-        const heading = current.querySelector('[role="heading"], .M7yZ2c, .pyv7Rf, .freebirdFormviewerComponentsQuestionBaseHeaderTitle');
-        if (heading) {
-          labelText = heading.innerText;
+    try {
+      const el = item.element;
+      const placeholder = el.getAttribute('placeholder') || '';
+      const name = el.getAttribute('name') || '';
+      const ariaLabel = el.getAttribute('aria-label') || '';
+      const type = el.getAttribute('type') || '';
+      const role = el.getAttribute('role') || '';
+      const currentValue = el.value || '';
+      
+      let labelText = '';
+      
+      // 1. Google Forms/Structured cards container climbing
+      let current = el;
+      while (current && current !== document.body) {
+        if (current.classList && (
+          current.classList.contains('Qr7Oae') || 
+          current.classList.contains('geS5ne') || 
+          current.getAttribute('role') === 'listitem' ||
+          current.classList.contains('freebirdFormviewerComponentsQuestionBaseRoot')
+        )) {
+          const heading = current.querySelector('[role="heading"], .M7yZ2c, .pyv7Rf, .freebirdFormviewerComponentsQuestionBaseHeaderTitle');
+          if (heading && heading.innerText) {
+            labelText = heading.innerText || '';
+          }
+          break;
         }
-        break;
+        current = current.parentElement;
       }
-      current = current.parentElement;
-    }
-    
-    // 2. Standard attributes fallbacks
-    if (!labelText.trim()) {
-      labelText = ariaLabel || placeholder || name || '';
-    }
-    
-    // 3. Fallback to direct inner text
-    if (!labelText.trim()) {
-      labelText = el.innerText || '';
-    }
-    
-    // 4. Ultimate parent inner text fallback
-    if (!labelText.trim()) {
-      const parent = el.parentElement;
-      if (parent) {
-        labelText = parent.innerText || '';
+      
+      // 2. Standard attributes fallbacks
+      if (!labelText || !labelText.trim()) {
+        labelText = ariaLabel || placeholder || name || '';
       }
+      
+      // 3. Fallback to direct inner text
+      if (!labelText || !labelText.trim()) {
+        labelText = el.innerText || '';
+      }
+      
+      // 4. Ultimate parent inner text fallback
+      if (!labelText || !labelText.trim()) {
+        const parent = el.parentElement;
+        if (parent) {
+          labelText = parent.innerText || '';
+        }
+      }
+      
+      return {
+        badge_id: item.id,
+        tag: el.tagName.toLowerCase(),
+        type,
+        role,
+        placeholder,
+        name,
+        ariaLabel,
+        currentValue: (currentValue || '').substring(0, 100).trim(),
+        labelText: (labelText || '').replace(/\n/g, ' ').substring(0, 80).trim()
+      };
+    } catch (e) {
+      return {
+        badge_id: item.id,
+        tag: item.element.tagName.toLowerCase(),
+        type: item.element.getAttribute('type') || '',
+        role: item.element.getAttribute('role') || '',
+        placeholder: item.element.getAttribute('placeholder') || '',
+        name: item.element.getAttribute('name') || '',
+        ariaLabel: item.element.getAttribute('aria-label') || '',
+        currentValue: '',
+        labelText: 'Interactive Element'
+      };
     }
-    
-    return {
-      badge_id: item.id,
-      tag: el.tagName.toLowerCase(),
-      type,
-      role,
-      placeholder,
-      name,
-      ariaLabel,
-      currentValue: currentValue.substring(0, 100).trim(),
-      labelText: labelText.replace(/\\n/g, ' ').substring(0, 80).trim()
-    };
   });
 })()
 """
@@ -210,38 +270,49 @@ WHOLE_FORM_SCAN_JS = """
   const inputs = Array.from(document.querySelectorAll(selectors.join(',')));
   
   return inputs.map(el => {
-    let labelText = '';
-    
-    // Google Forms/Structured cards container climbing
-    let current = el;
-    while (current && current !== document.body) {
-      if (current.classList && (
-        current.classList.contains('Qr7Oae') || 
-        current.classList.contains('geS5ne') || 
-        current.getAttribute('role') === 'listitem' ||
-        current.classList.contains('freebirdFormviewerComponentsQuestionBaseRoot')
-      )) {
-        const heading = current.querySelector('[role="heading"], .M7yZ2c, .pyv7Rf, .freebirdFormviewerComponentsQuestionBaseHeaderTitle');
-        if (heading) {
-          labelText = heading.innerText;
+    try {
+      let labelText = '';
+      
+      // Google Forms/Structured cards container climbing
+      let current = el;
+      while (current && current !== document.body) {
+        if (current.classList && (
+          current.classList.contains('Qr7Oae') || 
+          current.classList.contains('geS5ne') || 
+          current.getAttribute('role') === 'listitem' ||
+          current.classList.contains('freebirdFormviewerComponentsQuestionBaseRoot')
+        )) {
+          const heading = current.querySelector('[role="heading"], .M7yZ2c, .pyv7Rf, .freebirdFormviewerComponentsQuestionBaseHeaderTitle');
+          if (heading && heading.innerText) {
+            labelText = heading.innerText || '';
+          }
+          break;
         }
-        break;
+        current = current.parentElement;
       }
-      current = current.parentElement;
+      
+      if (!labelText || !labelText.trim()) {
+        labelText = el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('name') || '';
+      }
+      
+      return {
+        tag: el.tagName.toLowerCase(),
+        type: el.getAttribute('type') || '',
+        placeholder: el.getAttribute('placeholder') || '',
+        name: el.getAttribute('name') || '',
+        currentValue: el.value || '',
+        labelText: (labelText || '').replace(/\n/g, ' ').substring(0, 150).trim()
+      };
+    } catch (e) {
+      return {
+        tag: el.tagName.toLowerCase(),
+        type: el.getAttribute('type') || '',
+        placeholder: el.getAttribute('placeholder') || '',
+        name: el.getAttribute('name') || '',
+        currentValue: '',
+        labelText: 'Form Input'
+      };
     }
-    
-    if (!labelText.trim()) {
-      labelText = el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('name') || '';
-    }
-    
-    return {
-      tag: el.tagName.toLowerCase(),
-      type: el.getAttribute('type') || '',
-      placeholder: el.getAttribute('placeholder') || '',
-      name: el.getAttribute('name') || '',
-      currentValue: el.value || '',
-      labelText: labelText.replace(/\\n/g, ' ').substring(0, 150).trim()
-    };
   });
 })()
 """
@@ -260,77 +331,81 @@ PROGRAMMATIC_AUTOFILL_JS = """
   let filledCount = 0;
   
   inputs.forEach(el => {
-    let labelText = '';
-    
-    // Google Forms/Structured cards container climbing
-    let current = el;
-    while (current && current !== document.body) {
-      if (current.classList && (
-        current.classList.contains('Qr7Oae') || 
-        current.classList.contains('geS5ne') || 
-        current.getAttribute('role') === 'listitem' ||
-        current.classList.contains('freebirdFormviewerComponentsQuestionBaseRoot')
-      )) {
-        const heading = current.querySelector('[role="heading"], .M7yZ2c, .pyv7Rf, .freebirdFormviewerComponentsQuestionBaseHeaderTitle');
-        if (heading) {
-          labelText = heading.innerText;
-        }
-        break;
-      }
-      current = current.parentElement;
-    }
-    
-    if (!labelText.trim()) {
-      labelText = el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('name') || '';
-    }
-    
-    labelText = labelText.replace(/[\n\r\t\s\xa0\u200b]+/g, ' ').split('*')[0].trim();
-    if (!labelText) return;
-    
-    // Check if standard key matching matches
-    let matchedKey = '';
-    const combined = (labelText + ' ' + (el.getAttribute('placeholder') || '') + ' ' + (el.getAttribute('name') || '')).toLowerCase();
-    
-    // Match fields using exact standard rules
-    if (combined.includes('email') || combined.includes('e-mail') || combined.includes('mail id')) {
-      matchedKey = 'email';
-    } else if (combined.includes('phone') || combined.includes('mobile') || combined.includes('contact') || combined.includes('tel') || combined.includes('number')) {
-      if (!combined.includes('roll')) matchedKey = 'phone';
-    } else if (combined.includes('roll') || combined.includes('reg') || combined.includes('registration') || combined.includes('id number')) {
-      matchedKey = 'rollNo';
-    } else if (combined.includes('college') || combined.includes('university') || combined.includes('institute') || combined.includes('school')) {
-      matchedKey = 'college';
-    } else if (combined.includes('dept') || combined.includes('department') || combined.includes('branch') || combined.includes('course') || combined.includes('stream')) {
-      matchedKey = 'department';
-    } else if (combined.includes('name') || combined.includes('full name') || combined.includes('first name') || combined.includes('last name')) {
-      matchedKey = 'name';
-    }
-    
-    // If not standard, try matching custom keys from memory by stripping spaces and symbols
-    if (!matchedKey) {
-      const cleanLbl = labelText.toLowerCase().replace(/[^a-z0-9_]/g, '').trim();
-      for (const k of Object.keys(memory)) {
-        if (k.toLowerCase().replace(/[^a-z0-9_]/g, '') === cleanLbl) {
-          matchedKey = k;
+    try {
+      let labelText = '';
+      
+      // Google Forms/Structured cards container climbing
+      let current = el;
+      while (current && current !== document.body) {
+        if (current.classList && (
+          current.classList.contains('Qr7Oae') || 
+          current.classList.contains('geS5ne') || 
+          current.getAttribute('role') === 'listitem' ||
+          current.classList.contains('freebirdFormviewerComponentsQuestionBaseRoot')
+        )) {
+          const heading = current.querySelector('[role="heading"], .M7yZ2c, .pyv7Rf, .freebirdFormviewerComponentsQuestionBaseHeaderTitle');
+          if (heading && heading.innerText) {
+            labelText = heading.innerText || '';
+          }
           break;
         }
+        current = current.parentElement;
       }
-    }
-    
-    if (matchedKey && memory[matchedKey]) {
-      const targetVal = memory[matchedKey];
-      const currentVal = el.value || '';
       
-      // Fill the element programmatically if not already filled
-      if (!currentVal.trim()) {
-        el.value = targetVal;
-        
-        // Trigger React/framework state updates
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        el.dispatchEvent(new Event('blur', { bubbles: true }));
-        filledCount++;
+      if (!labelText || !labelText.trim()) {
+        labelText = el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('name') || '';
       }
+      
+      labelText = (labelText || '').replace(/[\n\r\t\s\xa0\u200b]+/g, ' ').split('*')[0].trim();
+      if (!labelText) return;
+      
+      // Check if standard key matching matches
+      let matchedKey = '';
+      const combined = (labelText + ' ' + (el.getAttribute('placeholder') || '') + ' ' + (el.getAttribute('name') || '')).toLowerCase();
+      
+      // Match fields using exact standard rules
+      if (combined.includes('email') || combined.includes('e-mail') || combined.includes('mail id')) {
+        matchedKey = 'email';
+      } else if (combined.includes('phone') || combined.includes('mobile') || combined.includes('contact') || combined.includes('tel') || combined.includes('number')) {
+        if (!combined.includes('roll')) matchedKey = 'phone';
+      } else if (combined.includes('roll') || combined.includes('reg') || combined.includes('registration') || combined.includes('id number')) {
+        matchedKey = 'rollNo';
+      } else if (combined.includes('college') || combined.includes('university') || combined.includes('institute') || combined.includes('school')) {
+        matchedKey = 'college';
+      } else if (combined.includes('dept') || combined.includes('department') || combined.includes('branch') || combined.includes('course') || combined.includes('stream')) {
+        matchedKey = 'department';
+      } else if (combined.includes('name') || combined.includes('full name') || combined.includes('first name') || combined.includes('last name')) {
+        matchedKey = 'name';
+      }
+      
+      // If not standard, try matching custom keys from memory by stripping spaces and symbols
+      if (!matchedKey) {
+        const cleanLbl = labelText.toLowerCase().replace(/[^a-z0-9_]/g, '').trim();
+        for (const k of Object.keys(memory)) {
+          if (k.toLowerCase().replace(/[^a-z0-9_]/g, '') === cleanLbl) {
+            matchedKey = k;
+            break;
+          }
+        }
+      }
+      
+      if (matchedKey && memory[matchedKey]) {
+        const targetVal = memory[matchedKey];
+        const currentVal = el.value || '';
+        
+        // Fill the element programmatically if not already filled
+        if (!currentVal.trim()) {
+          el.value = targetVal;
+          
+          // Trigger React/framework state updates
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          el.dispatchEvent(new Event('blur', { bubbles: true }));
+          filledCount++;
+        }
+      }
+    } catch (e) {
+      console.error('[ARIA Programmatic Autofill Error]:', e);
     }
   });
   
@@ -649,28 +724,120 @@ async def fill_form_with_playwright(url: str, memory: Dict[str, str], websocket=
                 
                 if not actions:
                     # Fallback to structural selector matcher if Vision returns empty or fails
-                    await broadcast_status(websocket, "Vision engine returned empty. Falling back to selector matcher...")
+                    await broadcast_status(websocket, "Vision engine returned empty. Falling back to structural matcher...")
                     fallback_filled = False
-                    inputs = await page.query_selector_all('input[type="text"], input[type="email"], input[type="tel"], textarea')
-                    for input_el in inputs:
-                        placeholder = clean_label(await input_el.get_attribute("placeholder") or "")
-                        name_attr = clean_label(await input_el.get_attribute("name") or "")
-                        matched_key = match_field_key(placeholder, placeholder, name_attr)
-                        if matched_key and memory.get(matched_key):
-                            current_val = await input_el.evaluate("el => el.value")
-                            if current_val and current_val.strip():
-                                continue
-                            await input_el.focus()
-                            await input_el.fill("")
-                            await page.keyboard.type(memory[matched_key], delay=30)
-                            fallback_filled = True
+                    
+                    # 1. Fill text inputs/textareas using structural climbing from unfilled_elements
+                    for el_data in unfilled_elements:
+                        tag = el_data.get("tag", "")
+                        el_type = el_data.get("type", "")
+                        badge_id = el_data.get("badge_id")
+                        
+                        if tag not in ["input", "textarea"] or el_type in ["submit", "button", "checkbox", "radio"]:
+                            continue
                             
+                        label = el_data.get("labelText", "")
+                        placeholder = el_data.get("placeholder", "")
+                        name_attr = el_data.get("name", "")
+                        
+                        matched_key = match_field_key(label, placeholder, name_attr)
+                        val = ""
+                        if matched_key:
+                            val = memory.get(matched_key, "")
+                        else:
+                            # Try custom key matching
+                            clean_lbl = re.sub(r'[\s\xa0\u200b]+', ' ', label).replace('*', '').lower().strip()
+                            clean_lbl = re.sub(r'[^a-z0-9]+', '_', clean_lbl).strip('_')
+                            
+                            for k, v in memory.items():
+                                clean_k = re.sub(r'[\s\xa0\u200b]+', ' ', k).replace('*', '').lower().strip()
+                                clean_k = re.sub(r'[^a-z0-9]+', '_', clean_k).strip('_')
+                                if clean_k == clean_lbl:
+                                    val = v
+                                    break
+                                    
+                        if val:
+                            el_handle = await page.evaluate_handle(
+                                "badgeId => window.ariaElements.find(x => x.id === badgeId)?.element",
+                                badge_id
+                            )
+                            if el_handle and el_handle.as_element():
+                                element = el_handle.as_element()
+                                current_val = await element.evaluate("el => el.value")
+                                if current_val and current_val.strip():
+                                    continue
+                                    
+                                await element.scroll_into_view_if_needed()
+                                await element.evaluate("el => el.style.boxShadow = '0 0 15px #10b981'")
+                                await asyncio.sleep(0.3)
+                                
+                                await element.focus()
+                                await element.fill("")
+                                await page.keyboard.type(val, delay=40)
+                                fallback_filled = True
+                                
+                                await element.evaluate("el => el.style.boxShadow = ''")
+                                await asyncio.sleep(0.5)
+                                
                     if fallback_filled:
                         await broadcast_status(websocket, "Successfully filled fields using fallback matcher.")
                         await asyncio.sleep(2)
-                    else:
-                        await broadcast_status(websocket, "No additional matchable elements found.")
-                        await asyncio.sleep(4)
+                        continue # Continue loop to re-scan and potentially submit or ask for more fields
+                        
+                    # 2. If nothing was filled, check if we can submit the form
+                    submit_btn_data = None
+                    for el_data in elements:
+                        tag = el_data.get("tag", "")
+                        role = el_data.get("role", "")
+                        type_attr = el_data.get("type", "")
+                        label = el_data.get("labelText", "").lower()
+                        
+                        is_submit = (tag == "button" or role == "button" or type_attr == "submit") and \
+                                    any(x in label for x in ["submit", "submit form", "send", "finish"])
+                        if is_submit:
+                            submit_btn_data = el_data
+                            break
+                            
+                    if submit_btn_data:
+                        badge_id = submit_btn_data.get("badge_id")
+                        el_handle = await page.evaluate_handle(
+                            "badgeId => window.ariaElements.find(x => x.id === badgeId)?.element",
+                            badge_id
+                        )
+                        if el_handle and el_handle.as_element():
+                            element = el_handle.as_element()
+                            await broadcast_status(websocket, "Form filled! Requesting submission permission...")
+                            active_sessions["submit_form_allowed"] = False
+                            event = asyncio.Event()
+                            active_sessions["submit_form"] = event
+                            
+                            targets = list(active_websockets)
+                            for ws in targets:
+                                try:
+                                    await ws.send_json({
+                                        "type": "permission_request",
+                                        "title": "Confirm Form Submission",
+                                        "description": "Visual ARIA has filled out all matched fields on the screen. Would you like me to click the Submit button automatically for you?",
+                                        "id": "submit_form"
+                                    })
+                                except Exception:
+                                    pass
+                                    
+                            await asyncio.wait_for(event.wait(), timeout=30.0)
+                            allowed = active_sessions.get("submit_form_allowed", False)
+                            
+                            if allowed:
+                                await broadcast_status(websocket, "Submitting form automatically...")
+                                await element.click()
+                                await asyncio.sleep(4)
+                                await broadcast_status(websocket, "Form submitted successfully!")
+                            else:
+                                await broadcast_status(websocket, "Submission declined. Keeping browser open for manual inspection.")
+                            
+                            break
+                            
+                    await broadcast_status(websocket, "No additional matchable elements or submit buttons found.")
+                    await asyncio.sleep(4)
                     break
                 
                 # Execute Bedrock Vision actions

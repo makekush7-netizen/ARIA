@@ -50,7 +50,7 @@ export default function AvatarZone({ greeting, activeTask, taskLog = [], memoryD
         
         {/* Agent Workflow Planner HUD */}
         {/* Agent Workflow Planner HUD */}
-        {(taskLog.length > 0 || activeTask) && (
+        {activeTask && (
           <div style={{
             position: 'absolute',
             top: '20px',
