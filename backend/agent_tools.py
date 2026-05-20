@@ -91,15 +91,14 @@ OVERLAY_JS = """
   
   let candidates = Array.from(document.querySelectorAll(selectors.join(',')));
   
-  const isVisible = (el) => {
+  const isDomVisible = (el) => {
     const rect = el.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0 && 
-           rect.bottom >= 0 && rect.right >= 0 &&
-           rect.top <= (window.innerHeight || document.documentElement.clientHeight) &&
-           rect.left <= (window.innerWidth || document.documentElement.clientWidth);
+    if (rect.width === 0 || rect.height === 0) return false;
+    const style = window.getComputedStyle(el);
+    return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
   };
   
-  candidates = candidates.filter(isVisible);
+  candidates = candidates.filter(isDomVisible);
 
   let index = 1;
   candidates.forEach(el => {
@@ -238,7 +237,7 @@ OVERLAY_JS = """
         name,
         ariaLabel,
         currentValue: (currentValue || '').substring(0, 100).trim(),
-        labelText: (labelText || '').replace(/\n/g, ' ').substring(0, 80).trim()
+        labelText: (labelText || '').replace(/\\n/g, ' ').substring(0, 80).trim()
       };
     } catch (e) {
       return {
@@ -566,7 +565,11 @@ async def fill_form_with_playwright(url: str, memory: Dict[str, str], websocket=
                     await broadcast_status(websocket, "Google Sign-In required! Please log in securely inside the browser...")
                     await asyncio.sleep(4)
                     continue
-                
+                try:
+                    await page.wait_for_selector('input, textarea, [role="textbox"], button', timeout=5000)
+                except Exception:
+                    pass
+                    
                 await broadcast_status(websocket, "Injecting element badges onto page layout...")
                 elements = await page.evaluate(OVERLAY_JS)
                 await asyncio.sleep(1) # wait for render
