@@ -103,9 +103,15 @@ export default function App() {
           if (audioContextRef.current === ac) {
             audioContextRef.current = null
           }
+          setAgentState('idle')
         }
+      } else {
+        setAgentState('idle')
       }
-    } catch (e) { console.error('TTS Error', e) }
+    } catch (e) { 
+      console.error('TTS Error', e)
+      setAgentState('idle')
+    }
   }
 
   // WebSocket
@@ -138,15 +144,13 @@ export default function App() {
               
               const cleanTTS = finalText.replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF])/g, '').replace(/\(.*?\)/g, '').replace(/\[.*?\]/g, '').trim()
               
-              // Truncate cleanTTS to first sentence or first 110 characters to ensure ultra-fast, sub-second synthesis
-              let shortTTS = cleanTTS.split(/[.!?]+/)[0] + '.';
-              if (shortTTS.length > 110) {
-                shortTTS = cleanTTS.substring(0, 100) + '...';
+              // Capping cleanTTS at 350 characters to maintain low-latency synthesis without cutting sentences short.
+              let shortTTS = cleanTTS;
+              if (cleanTTS.length > 350) {
+                shortTTS = cleanTTS.substring(0, 340) + '...';
               }
               
               if (cleanTTS) speakResponse(shortTTS)
-
-              setTimeout(() => setAgentState('idle'), 4000)
             }
             if (data.type === 'permission_request') {
               // Beep sound for HITL to alert the user!
@@ -230,7 +234,7 @@ export default function App() {
               <path d="M12 2v20M2 12h20M4.9 4.9l14.2 14.2M4.9 19.1 19.1 4.9M8 4l8 16M4 8l16 8M4 16l16-8M8 20 16 4"/>
             </svg>
           </div>
-          <span className="logo-text">AURORA</span>
+          <span className="logo-text">ARIA</span>
         </div>
         <div className="navbar-nav">
           {navItems.map(item => (

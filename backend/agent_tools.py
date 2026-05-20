@@ -246,6 +246,98 @@ WHOLE_FORM_SCAN_JS = """
 })()
 """
 
+PROGRAMMATIC_AUTOFILL_JS = """
+(memory => {
+  const selectors = [
+    'input[type="text"]',
+    'input[type="email"]',
+    'input[type="tel"]',
+    'input[type="number"]',
+    'textarea'
+  ];
+  
+  const inputs = Array.from(document.querySelectorAll(selectors.join(',')));
+  let filledCount = 0;
+  
+  inputs.forEach(el => {
+    let labelText = '';
+    
+    // Google Forms/Structured cards container climbing
+    let current = el;
+    while (current && current !== document.body) {
+      if (current.classList && (
+        current.classList.contains('Qr7Oae') || 
+        current.classList.contains('geS5ne') || 
+        current.getAttribute('role') === 'listitem' ||
+        current.classList.contains('freebirdFormviewerComponentsQuestionBaseRoot')
+      )) {
+        const heading = current.querySelector('[role="heading"], .M7yZ2c, .pyv7Rf, .freebirdFormviewerComponentsQuestionBaseHeaderTitle');
+        if (heading) {
+          labelText = heading.innerText;
+        }
+        break;
+      }
+      current = current.parentElement;
+    }
+    
+    if (!labelText.trim()) {
+      labelText = el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('name') || '';
+    }
+    
+    labelText = labelText.replace(/\\n/g, ' ').split('*')[0].trim();
+    if (!labelText) return;
+    
+    // Check if standard key matching matches
+    let matchedKey = '';
+    const combined = (labelText + ' ' + (el.getAttribute('placeholder') || '') + ' ' + (el.getAttribute('name') || '')).toLowerCase();
+    
+    // Match fields using exact standard rules
+    if (combined.includes('email') || combined.includes('e-mail') || combined.includes('mail id')) {
+      matchedKey = 'email';
+    } else if (combined.includes('phone') || combined.includes('mobile') || combined.includes('contact') || combined.includes('tel') || combined.includes('number')) {
+      if (!combined.includes('roll')) matchedKey = 'phone';
+    } else if (combined.includes('roll') || combined.includes('reg') || combined.includes('registration') || combined.includes('id number')) {
+      matchedKey = 'rollNo';
+    } else if (combined.includes('college') || combined.includes('university') || combined.includes('institute') || combined.includes('school')) {
+      matchedKey = 'college';
+    } else if (combined.includes('dept') || combined.includes('department') || combined.includes('branch') || combined.includes('course') || combined.includes('stream')) {
+      matchedKey = 'department';
+    } else if (combined.includes('name') || combined.includes('full name') || combined.includes('first name') || combined.includes('last name')) {
+      matchedKey = 'name';
+    }
+    
+    // If not standard, try matching custom keys from memory by stripping spaces and symbols
+    if (!matchedKey) {
+      const cleanLbl = labelText.toLowerCase().replace(/[^a-z0-9_]/g, '').trim();
+      for (const k of Object.keys(memory)) {
+        if (k.toLowerCase().replace(/[^a-z0-9_]/g, '') === cleanLbl) {
+          matchedKey = k;
+          break;
+        }
+      }
+    }
+    
+    if (matchedKey && memory[matchedKey]) {
+      const targetVal = memory[matchedKey];
+      const currentVal = el.value || '';
+      
+      // Fill the element programmatically if not already filled
+      if (!currentVal.trim()) {
+        el.value = targetVal;
+        
+        // Trigger React/framework state updates
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        el.dispatchEvent(new Event('blur', { bubbles: true }));
+        filledCount++;
+      }
+    }
+  });
+  
+  return filledCount;
+})
+"""
+
 async def query_bedrock_vision(screenshot_path: Path, elements_list: list, memory: dict, page_title: str = "", page_header: str = "") -> list:
     """Queries Bedrock Nova Pro to visually match elements to memory values"""
     try:
@@ -399,6 +491,12 @@ async def fill_form_with_playwright(url: str, memory: Dict[str, str], websocket=
                 await broadcast_status(websocket, "Injecting element badges onto page layout...")
                 elements = await page.evaluate(OVERLAY_JS)
                 await asyncio.sleep(1) # wait for render
+                
+                # Programmatically fill any already-known memory fields to make page load ultra-fast and visual mapping clean!
+                autofilled_count = await page.evaluate(PROGRAMMATIC_AUTOFILL_JS, memory)
+                if autofilled_count > 0:
+                    await broadcast_status(websocket, f"Autofilled {autofilled_count} known fields from memory...")
+                    await asyncio.sleep(1)
                 
                 if not elements:
                     await broadcast_status(websocket, "No interactive elements detected on page. Form might be completed.")

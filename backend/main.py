@@ -593,14 +593,15 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                         
                 elif msg_type_str == "permission_response":
-                    # Check if response is an object (for input/voice HITL) or boolean (for submit HITL)
-                    if isinstance(data, dict) and "value" in data:
+                    # Check if response is an object (for input/voice HITL or batch HITL) or boolean (for submit HITL)
+                    if isinstance(data, dict) and ("value" in data or "values" in data):
                         allowed = data.get("allowed", False)
                         val = data.get("value", "")
-                        print(f"[WS] HITL Input Response: Allowed={allowed}, Value='{val}'")
+                        vals = data.get("values", {})
+                        print(f"[WS] HITL Input/Batch Response: Allowed={allowed}, Value='{val}', Values={vals}")
                         
                         from agent_tools import active_sessions
-                        active_sessions["hitl_input_response"] = {"allowed": allowed, "value": val}
+                        active_sessions["hitl_input_response"] = {"allowed": allowed, "value": val, "values": vals}
                         if "hitl_input" in active_sessions:
                             active_sessions["hitl_input"].set()
                     else:
