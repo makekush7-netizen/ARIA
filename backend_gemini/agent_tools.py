@@ -596,8 +596,9 @@ async def fill_form_with_playwright(url: str, memory: Dict[str, str], websocket=
                     await asyncio.sleep(1)
                 
                 if not elements:
-                    await broadcast_status(websocket, "No interactive elements detected on page. Form might be completed.")
-                    await asyncio.sleep(4)
+                    await broadcast_status(websocket, "No interactive elements detected on page. Keeping browser open for manual inspection.")
+                    while not page.is_closed():
+                        await asyncio.sleep(1)
                     break
                 
                 # Dynamic Programmatic Batch Missing Fields Scan
@@ -852,10 +853,13 @@ async def fill_form_with_playwright(url: str, memory: Dict[str, str], websocket=
                             else:
                                 await broadcast_status(websocket, "Submission declined. Keeping browser open for manual inspection.")
                             
+                            while not page.is_closed():
+                                await asyncio.sleep(1)
                             break
                             
-                    await broadcast_status(websocket, "No additional matchable elements or submit buttons found.")
-                    await asyncio.sleep(4)
+                    await broadcast_status(websocket, "No additional matchable elements or submit buttons found. Keeping browser open for manual inspection.")
+                    while not page.is_closed():
+                        await asyncio.sleep(1)
                     break
                 
                 # Execute Gemini Vision actions
@@ -1014,7 +1018,8 @@ async def fill_form_with_playwright(url: str, memory: Dict[str, str], websocket=
                             else:
                                 await broadcast_status(websocket, "Submission declined. Keeping browser open for manual inspection.")
                             
-                            # Set loop_count to max_loops to break out of the main while loop completely!
+                            while not page.is_closed():
+                                await asyncio.sleep(1)
                             loop_count = max_loops
                             break
                         else:

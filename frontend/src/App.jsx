@@ -148,6 +148,13 @@ export default function App() {
                 window.dispatchEvent(new CustomEvent('aura:setEmotion', { detail: 'happy' }))
               }
               
+              const actionMatch = finalText.match(/\[ACTION:\s*(\w+)\]/i)
+              if (actionMatch) {
+                const action = actionMatch[1].toLowerCase()
+                window.dispatchEvent(new CustomEvent('aura:setAction', { detail: action }))
+                finalText = finalText.replace(actionMatch[0], '').trim()
+              }
+              
               setMessages(p => [...p, { role: 'assistant', content: finalText, timestamp: new Date() }])
               
               const cleanTTS = finalText.replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF])/g, '').replace(/\(.*?\)/g, '').replace(/\[.*?\]/g, '').trim()

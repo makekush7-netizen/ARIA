@@ -104,10 +104,12 @@ export default function AvatarModel({
             
             Promise.all([
                 loadMixamoAnimation('/Idle (3).fbx', vrmInstance),
-                loadMixamoAnimation('/Talking (1).fbx', vrmInstance)
-            ]).then(([idleClip, talkClip]) => {
+                loadMixamoAnimation('/Talking (1).fbx', vrmInstance),
+                loadMixamoAnimation('/Hip Hop Dancing.fbx', vrmInstance)
+            ]).then(([idleClip, talkClip, danceClip]) => {
                 actionsRef.current['idle'] = mixer.clipAction(idleClip)
                 actionsRef.current['talking'] = mixer.clipAction(talkClip)
+                actionsRef.current['dance'] = mixer.clipAction(danceClip)
                 
                 const idleAction = actionsRef.current['idle']
                 if (idleAction) {
@@ -151,6 +153,22 @@ export default function AvatarModel({
         }
         window.addEventListener('aura:talking', onTalking)
         return () => window.removeEventListener('aura:talking', onTalking)
+    }, [vrm])
+
+    // 1.5. ACTIONS (Dance, etc)
+    useEffect(() => {
+        const onAction = (e) => {
+            const action = e.detail
+            if (action === 'dance') {
+                playAnimation('dance')
+                // Revert to idle after 8 seconds (or animation length)
+                setTimeout(() => {
+                    playAnimation('idle')
+                }, 8000)
+            }
+        }
+        window.addEventListener('aura:setAction', onAction)
+        return () => window.removeEventListener('aura:setAction', onAction)
     }, [vrm])
 
     // 2. EMOTIONS (One Shot triggers)
