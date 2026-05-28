@@ -6,7 +6,7 @@ An interactive AI companion featuring a 3D avatar, local TTS, and beautiful UI/U
 
 - Node.js (v18+)
 - Python 3.10+
-- AWS Credentials (for Bedrock/Polly if used)
+- Gemini API key (for chat and vision)
 
 ## Setup
 

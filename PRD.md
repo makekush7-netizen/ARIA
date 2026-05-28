@@ -31,14 +31,14 @@ aura/
 |---|---|
 | Frontend | React + React Three Fiber (existing) + Tailwind CSS |
 | Avatar | Ready Player Me GLB (existing in repo) |
-| Voice In | Browser Web Speech API → Nova Sonic (AWS Bedrock) |
-| Voice Out | AWS Nova Sonic bidirectional stream (replaces Kokoro) |
-| Agent Brain | AWS Nova (Bedrock) `amazon.nova-pro-v1:0` |
+| Voice In | Browser Web Speech API (local) |
+| Voice Out | Kokoro TTS (local) |
+| Agent Brain | Gemini `gemini-1.5-flash` |
 | Browser Agent | Python Playwright (chromium) |
 | Screen Capture | `mss` + `Pillow` for screenshots |
 | Memory | Local JSON file `~/.aria/memory.json` |
 | Backend | FastAPI + WebSocket |
-| Cloud | AWS (160$ credits, us-east-1) |
+| Cloud | None required (local + API) |
 
 ---
 
@@ -84,7 +84,7 @@ Two tabs:
 - Unreal Engine Skill (₹249)
 
 ### 4.5 Settings
-- Voice: Nova Sonic / Browser TTS toggle
+- Voice: Kokoro / Browser TTS toggle
 - Compute: Cloud / Local / Hybrid
 - Agent permission level: Ask always / Ask for critical / Auto
 - Theme: Dark Warm / Dark Cool
@@ -102,7 +102,7 @@ Trigger: user says "fill the [form name] for me"
 Flow:
 1. Agent reads memory for required fields
 2. Opens URL in playwright browser (visible window)
-3. Takes screenshot, identifies fields via Nova vision
+3. Takes screenshot, identifies fields via Gemini vision
 4. For each field: asks human permission if sensitive ("Should I fill your phone number?")
 5. Types values, submits only after final user confirm
 6. Reports done with summary
@@ -112,8 +112,8 @@ Trigger: "check my emails" / "read my new emails"
 Flow:
 1. Opens Gmail in playwright
 2. Screenshots inbox
-3. Nova reads visible emails, summarizes top 5
-4. Speaks summary back via Nova Sonic
+3. Gemini reads visible emails, summarizes top 5
+4. Speaks summary back via Kokoro
 
 ### 5.4 Skill: Blender (Demo Only)
 - Pre-scripted: opens Blender, creates a cube, renders it
@@ -155,27 +155,26 @@ File: `~/.aria/memory.json`
 
 ---
 
-## 8. Nova Sonic Integration
+## 8. Gemini Integration
 
-Model: `amazon.nova-sonic-v1:0` (us-east-1)
-Protocol: Bidirectional WebSocket stream via `boto3` `invoke_model_with_bidirectional_stream`
+Model: `gemini-1.5-flash`
+Protocol: HTTPS API calls from the backend
 
 Flow:
-1. Frontend captures mic audio (PCM 16kHz mono)
-2. Sends audio chunks via WebSocket to `/ws/voice`
-3. Backend streams to Nova Sonic
-4. Nova Sonic returns: transcript + audio response
-5. Backend streams audio back to frontend
-6. Frontend plays audio + triggers avatar mouth animation
+1. Frontend captures mic audio (PCM 16kHz mono) using the browser Web Speech API
+2. Frontend sends transcript via WebSocket to `/ws`
+3. Backend sends the prompt + memory context to Gemini
+4. Gemini returns a response (and optional tool-call JSON)
+5. Frontend renders text and triggers avatar mouth animation
 
-Key: Nova Sonic handles BOTH STT and TTS in one stream. No separate Whisper or Kokoro needed.
+Key: Gemini handles the main assistant reasoning while Kokoro provides local TTS.
 
 ---
 
 ## 9. Build Priority Order
 
 1. Frontend restyle + Store + Memory UI (no backend changes)
-2. Nova Sonic voice pipeline
+2. Gemini + Kokoro pipeline
 3. Screen agent (playwright + screenshot)
 4. Form fill skill end-to-end
 5. Email check skill
