@@ -17,10 +17,10 @@ const Icons = {
 }
 
 const SKINS = [
-  { id: 'default', name: 'Default ARIA', desc: 'The classic look', icon: <Icons.User />, price: null, equipped: true },
-  { id: 'cyber', name: 'Cyber Samurai', desc: 'Futuristic warrior', icon: <Icons.Sword />, price: '₹299', equipped: false },
-  { id: 'minimal', name: 'Minimalist', desc: 'Clean & simple', icon: <Icons.Square />, price: '₹199', equipped: false },
-  { id: 'neon', name: 'Neon Goddess', desc: 'Electric & bold', icon: <Icons.Sparkles />, price: '₹399', equipped: false },
+  { id: 'default', name: 'Default ARIA', desc: 'The classic look', icon: <Icons.User />, image: null, price: null, equipped: true },
+  { id: 'kirito', name: 'Kirito', desc: 'The Black Swordsman', icon: null, image: '/kirito.png', price: '₹299', equipped: false },
+  { id: 'kaniko', name: 'Kaniko', desc: 'Cyberpunk hacker', icon: null, image: '/Kaniko.png', price: '₹199', equipped: false },
+  { id: 'subaru', name: 'Subaru', desc: 'Return by Death', icon: null, image: '/subaru.png', price: '₹399', equipped: false },
 ]
 
 const SKILLS = [
@@ -62,7 +62,13 @@ export default function StorePage() {
           {SKINS.map(s => (
             <div key={s.id} className="store-card">
               <div className="store-card-content">
-                <div className="store-card-icon">{s.icon}</div>
+                {s.image ? (
+                  <div className="store-card-icon skin-preview">
+                    <img src={s.image} alt={s.name} />
+                  </div>
+                ) : (
+                  <div className="store-card-icon">{s.icon}</div>
+                )}
                 <div className="store-card-name">{s.name}</div>
                 <div className="store-card-meta">{s.desc}</div>
               </div>

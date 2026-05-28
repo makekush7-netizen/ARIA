@@ -105,11 +105,15 @@ export default function AvatarModel({
             Promise.all([
                 loadMixamoAnimation('/Idle (3).fbx', vrmInstance),
                 loadMixamoAnimation('/Talking (1).fbx', vrmInstance),
-                loadMixamoAnimation('/Hip Hop Dancing.fbx', vrmInstance)
-            ]).then(([idleClip, talkClip, danceClip]) => {
+                loadMixamoAnimation('/Hip Hop Dancing.fbx', vrmInstance),
+                loadMixamoAnimation('/Jumping Jacks.fbx', vrmInstance),
+                loadMixamoAnimation('/Victory.fbx', vrmInstance)
+            ]).then(([idleClip, talkClip, danceClip, jumpingJacksClip, victoryClip]) => {
                 actionsRef.current['idle'] = mixer.clipAction(idleClip)
                 actionsRef.current['talking'] = mixer.clipAction(talkClip)
                 actionsRef.current['dance'] = mixer.clipAction(danceClip)
+                actionsRef.current['jumping_jacks'] = mixer.clipAction(jumpingJacksClip)
+                actionsRef.current['victory'] = mixer.clipAction(victoryClip)
                 
                 const idleAction = actionsRef.current['idle']
                 if (idleAction) {
@@ -155,16 +159,16 @@ export default function AvatarModel({
         return () => window.removeEventListener('aura:talking', onTalking)
     }, [vrm])
 
-    // 1.5. ACTIONS (Dance, etc)
+    // 1.5. ACTIONS (Dance, Jumping Jacks, Victory, etc)
     useEffect(() => {
         const onAction = (e) => {
             const action = e.detail
-            if (action === 'dance') {
-                playAnimation('dance')
-                // Revert to idle after 8 seconds (or animation length)
+            const durations = { dance: 8000, jumping_jacks: 6000, victory: 5000 }
+            if (actionsRef.current[action]) {
+                playAnimation(action)
                 setTimeout(() => {
                     playAnimation('idle')
-                }, 8000)
+                }, durations[action] || 6000)
             }
         }
         window.addEventListener('aura:setAction', onAction)
